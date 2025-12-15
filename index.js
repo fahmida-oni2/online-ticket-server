@@ -19,16 +19,16 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-    // await client.connect();
+    await client.connect();
     const db = client.db("ticket-db");
     const ticketCollection = db.collection("tickets");
-
-   app.get("/tickets", async (req, res) => {
+    // Read tickets
+    app.get("/tickets", async (req, res) => {
       const result = await ticketCollection.find().toArray();
       res.send(result);
     });
 
-
+    // create new tickets
     app.post("/tickets", async (req, res) => {
       const data = req.body;
       const result = await ticketCollection.insertOne(data);
@@ -38,7 +38,42 @@ async function run() {
       });
     });
 
-    // await client.db("admin").command({ ping: 1 });
+    // READ TICKETS BY VENDOR EMAIL
+    app.get("/my-tickets", async (req, res) => {
+      const email = req.query.email;
+      const cursor = ticketCollection.find({ vendorEmail: email });
+      const result = await cursor.toArray();
+      res.send(result);
+    });
+
+    // update ticket
+    app.patch("/all-tickets/:id", async (req, res) => {
+      const { id } = req.params;
+      const data = req.body;
+      const ticketId = new ObjectId(id);
+      delete data._id;
+
+      const filter = { _id: ticketId };
+      const update = {
+        $set: data,
+      };
+      const result = await ticketCollection.updateOne(filter, update);
+
+      res.send(result);
+    });
+
+    app.delete("/all-tickets/:id", async (req, res) => {
+      const { id } = req.params;
+      const ticketId = new ObjectId(id);
+
+      const result = await ticketCollection.deleteOne({
+        _id: ticketId,
+      });
+
+      res.send(result);
+    });
+
+    await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
