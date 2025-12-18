@@ -1,12 +1,53 @@
 const express = require("express");
 const cors = require("cors");
+const crypto = require("crypto");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 require("dotenv").config();
 const stripe = require("stripe")(process.env.STRIPE_KEY);
 const app = express();
 const port = 3000;
+
+
+const admin = require("firebase-admin");
+
+const serviceAccount = require("./online-ticket-platform-firebase-adminsdk.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
+function generateTrackingId() {
+  const prefix = "PRCL";
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const random = crypto.randomBytes(3).toString("hex").toUpperCase();
+
+  return `${prefix}-${date}-${random}`;
+}
+
+// middleware
 app.use(cors());
 app.use(express.json());
+
+const verifyFBToken = async (req, res, next) => {
+    const token = req.headers.authorization;
+
+    if (!token) {
+        return res.status(401).send({ message: 'unauthorized access' })
+    }
+
+    try {
+        const idToken = token.split(' ')[1];
+        const decoded = await admin.auth().verifyIdToken(idToken);
+        console.log('decoded in the token', decoded);
+        req.decoded_email = decoded.email;
+        next();
+    }
+    catch (err) {
+        return res.status(401).send({ message: 'unauthorized access' })
+    }
+
+
+}
 
 const uri = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@cluster0.pwy4qnn.mongodb.net/?appName=Cluster0`;
 
@@ -24,6 +65,7 @@ async function run() {
     const db = client.db("ticket-db");
     const ticketCollection = db.collection("tickets");
     const bookingCollection = db.collection("bookings");
+    const paymentCollection = db.collection("payments");
     // Read tickets
     app.get("/tickets", async (req, res) => {
       const result = await ticketCollection.find().toArray();
@@ -180,6 +222,26 @@ async function run() {
     });
 
     // payment api
+
+    app.get('/payments',verifyFBToken, async (req, res) => {
+            const email = req.query.email;
+            const query = {}
+
+            if (email) {
+                query.customerEmail = email;
+
+                if (email !== req.decoded_email) {
+                    return res.status(403).send({ message: 'forbidden access' })
+                }
+            }
+            const cursor = paymentCollection.find(query).sort({ paidAt: -1 });
+            const result = await cursor.toArray();
+            res.send(result);
+        })
+
+
+    // create payments
+
     app.post("/create-checkout-session", async (req, res) => {
       const paymentInfo = req.body;
       const amount = Math.round(parseFloat(paymentInfo.cost) * 100);
@@ -200,6 +262,7 @@ async function run() {
         mode: "payment",
         metadata: {
           ticketId: paymentInfo.ticketId,
+          ticketTitle: paymentInfo.ticketTitle,
         },
         success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
@@ -218,6 +281,24 @@ async function run() {
             .send({ success: false, message: "Missing session_id" });
 
         const session = await stripe.checkout.sessions.retrieve(sessionId);
+        // console.log(session);
+
+        const transactionId = session.payment_intent;
+        const query = { transactionId: transactionId };
+
+        const paymentExist = await paymentCollection.findOne(query);
+        console.log(paymentExist);
+        if (paymentExist) {
+          const relatedBooking = await bookingCollection.findOne({
+            _id: new ObjectId(session.metadata.ticketId),
+          });
+          return res.send({
+            message: "already exists",
+            transactionId,
+           trackingId: paymentExist.trackingId || (relatedBooking ? relatedBooking.trackingId : 'N/A')
+          });
+        }
+        const trackingId = session.metadata.trackingId;
 
         if (session.payment_status === "paid") {
           const bookingId = session.metadata.ticketId;
@@ -249,10 +330,12 @@ async function run() {
           const currentQuantity = parseInt(ticket.quantity) || 0;
           const bookedQuantity = parseInt(booking.bookingQuantity) || 0;
           const newQuantity = currentQuantity - bookedQuantity;
-
+          const trackingId = generateTrackingId();
           await bookingCollection.updateOne(
             { _id: new ObjectId(bookingId) },
-            { $set: { bookingStatus: "paid" } }
+            {
+              $set: { bookingStatus: "paid", trackingId: trackingId },
+            }
           );
 
           const updateTicketResult = await ticketCollection.updateOne(
@@ -260,11 +343,31 @@ async function run() {
             { $set: { quantity: newQuantity } }
           );
 
-          return res.send({
-            success: true,
-            message: "Payment successful and quantity updated.",
-            updatedQuantity: newQuantity,
-          });
+          const paymentHistory = {
+            amount: session.amount_total,
+            currency: session.currency,
+            customerEmail: session.customer_email,
+            ticketId: session.metadata.ticketId,
+            ticketTitle: session.metadata.ticketTitle,
+            transactionId: session.payment_intent,
+            paymentStatus: session.payment_status,
+            paidAt: new Date(),
+          };
+
+          if (session.payment_status === "paid") {
+            const resultPayment = await paymentCollection.insertOne(
+              paymentHistory
+            );
+            return res.send({
+              success: true,
+              message: "Payment successful and quantity updated.",
+              updatedQuantity: newQuantity,
+              modifyTicket: updateTicketResult,
+              trackingId: trackingId,
+              transactionId: session.payment_intent,
+              paymentInfo: resultPayment,
+            });
+          }
         }
 
         res
