@@ -7,13 +7,12 @@ const stripe = require("stripe")(process.env.STRIPE_KEY);
 const app = express();
 const port = 3000;
 
-
 const admin = require("firebase-admin");
 
 const serviceAccount = require("./online-ticket-platform-firebase-adminsdk.json");
 
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+  credential: admin.credential.cert(serviceAccount),
 });
 
 function generateTrackingId() {
@@ -29,25 +28,22 @@ app.use(cors());
 app.use(express.json());
 
 const verifyFBToken = async (req, res, next) => {
-    const token = req.headers.authorization;
+  const token = req.headers.authorization;
 
-    if (!token) {
-        return res.status(401).send({ message: 'unauthorized access' })
-    }
+  if (!token) {
+    return res.status(401).send({ message: "unauthorized access" });
+  }
 
-    try {
-        const idToken = token.split(' ')[1];
-        const decoded = await admin.auth().verifyIdToken(idToken);
-        console.log('decoded in the token', decoded);
-        req.decoded_email = decoded.email;
-        next();
-    }
-    catch (err) {
-        return res.status(401).send({ message: 'unauthorized access' })
-    }
-
-
-}
+  try {
+    const idToken = token.split(" ")[1];
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    console.log("decoded in the token", decoded);
+    req.decoded_email = decoded.email;
+    next();
+  } catch (err) {
+    return res.status(401).send({ message: "unauthorized access" });
+  }
+};
 
 const uri = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@cluster0.pwy4qnn.mongodb.net/?appName=Cluster0`;
 
@@ -63,13 +59,174 @@ async function run() {
   try {
     await client.connect();
     const db = client.db("ticket-db");
+    const userCollection = db.collection("users");
+    const vendorCollection = db.collection("vendor");
     const ticketCollection = db.collection("tickets");
     const bookingCollection = db.collection("bookings");
     const paymentCollection = db.collection("payments");
-    // Read tickets
-    app.get("/tickets", async (req, res) => {
-      const result = await ticketCollection.find().toArray();
+
+    // user related api
+    app.post("/users", async (req, res) => {
+      const user = req.body;
+      user.role = "user";
+      user.createdAt = new Date();
+      const email = user.email;
+      const userExists = await userCollection.findOne({ email });
+
+      if (userExists) {
+        return res.send({ message: "user exists" });
+      }
+
+      const result = await userCollection.insertOne(user);
       res.send(result);
+    });
+
+    // vendor related api:
+    app.post("/vendor", async (req, res) => {
+      const vendor = req.body;
+      vendor.status = "pending";
+      vendor.createdAt = new Date();
+
+      const result = await vendorCollection.insertOne(vendor);
+      res.send(result);
+    });
+    // Update user role to vendor
+    app.patch("/users/role/:email", async (req, res) => {
+      const email = req.params.email;
+      const { role } = req.body;
+
+      const filter = { email: email };
+      const updatedDoc = {
+        $set: {
+          role: role,
+        },
+      };
+
+      const result = await userCollection.updateOne(filter, updatedDoc);
+      res.send(result);
+    });
+
+    // update status
+    app.patch("/vendor/status/:id", verifyFBToken, async (req, res) => {
+      const status = req.body.status;
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const updatedDoc = {
+        $set: {
+          status: status,
+        },
+      };
+
+      const result = await vendorCollection.updateOne(query, updatedDoc);
+
+      if (status === "approved") {
+        const email = req.body.email;
+        const userQuery = { email };
+        const updateUser = {
+          $set: {
+            role: "vendor",
+          },
+        };
+        const userResult = await userCollection.updateOne(
+          userQuery,
+          updateUser
+        );
+      }
+
+      res.send(result);
+    });
+
+    app.get("/vendor", async (req, res) => {
+      try {
+        const email = req.query.email;
+        if (email) {
+          const result = await vendorCollection.findOne({ email: email });
+          res.send(result);
+        } else {
+          const result = await vendorCollection.find().toArray();
+          res.send(result);
+        }
+      } catch (error) {
+        res.status(500).send({ message: "Error fetching vendor data", error });
+      }
+    });
+
+    // update ticket
+    app.patch("/vendor/edit-ticket/:id", async (req, res) => {
+      const { id } = req.params;
+      const data = req.body;
+      const ticketId = new ObjectId(id);
+      delete data._id;
+      delete data.status;
+      delete data.vendorEmail;
+
+      const filter = { _id: ticketId };
+      const update = {
+        $set: data,
+      };
+      const result = await vendorCollection.updateOne(filter, update);
+
+      res.send(result);
+    });
+
+    // Delete ticket
+    app.delete("/vendor/:id", async (req, res) => {
+      const { id } = req.params;
+      const ticketId = new ObjectId(id);
+
+      const result = await vendorCollection.deleteOne({
+        _id: ticketId,
+      });
+
+      res.send(result);
+    });
+
+    // Read data from vendor collection
+    app.get("/my-tickets", async (req, res) => {
+      try {
+        const email = req.query.email;
+        if (!email)
+          return res.status(400).send({ message: "Email query is required" });
+        const query = { vendorEmail: email };
+        const result = await vendorCollection.find(query).toArray();
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Internal Server Error", error });
+      }
+    });
+    // read
+    app.get("/users/:email", async (req, res) => {
+      const email = req.params.email;
+      const result = await userCollection.findOne({ email });
+      res.send(result);
+    });
+
+    app.post("/tickets", async (req, res) => {
+      const data = req.body;
+
+      if (data.quantity) {
+        data.quantity = parseInt(data.quantity);
+        if (isNaN(data.quantity)) {
+          return res
+            .status(400)
+            .send({ message: "Quantity must be a valid number." });
+        }
+      }
+
+      const result = await ticketCollection.insertOne(data);
+
+      if (data.vendorEmail) {
+        await userCollection.updateOne(
+          { email: data.vendorEmail },
+          { $set: { role: "vendor" } }
+        );
+      }
+
+      res.send({
+        success: true,
+        result,
+      });
     });
 
     app.get("/all-tickets/:id", async (req, res) => {
@@ -81,60 +238,6 @@ async function run() {
         success: true,
         result,
       });
-    });
-
-    // create new tickets
-    app.post("/tickets", async (req, res) => {
-      const data = req.body;
-      if (data.quantity) {
-        data.quantity = parseInt(data.quantity);
-        if (isNaN(data.quantity)) {
-          return res
-            .status(400)
-            .send({ message: "Quantity must be a valid number." });
-        }
-      }
-      const result = await ticketCollection.insertOne(data);
-      res.send({
-        success: true,
-        result,
-      });
-    });
-
-    // READ TICKETS BY VENDOR EMAIL
-    app.get("/my-tickets", async (req, res) => {
-      const email = req.query.email;
-      const cursor = ticketCollection.find({ vendorEmail: email });
-      const result = await cursor.toArray();
-      res.send(result);
-    });
-
-    // update ticket
-    app.patch("/all-tickets/:id", async (req, res) => {
-      const { id } = req.params;
-      const data = req.body;
-      const ticketId = new ObjectId(id);
-      delete data._id;
-
-      const filter = { _id: ticketId };
-      const update = {
-        $set: data,
-      };
-      const result = await ticketCollection.updateOne(filter, update);
-
-      res.send(result);
-    });
-
-    // Delete ticket
-    app.delete("/all-tickets/:id", async (req, res) => {
-      const { id } = req.params;
-      const ticketId = new ObjectId(id);
-
-      const result = await ticketCollection.deleteOne({
-        _id: ticketId,
-      });
-
-      res.send(result);
     });
 
     //  booking tickets
@@ -223,22 +326,21 @@ async function run() {
 
     // payment api
 
-    app.get('/payments',verifyFBToken, async (req, res) => {
-            const email = req.query.email;
-            const query = {}
+    app.get("/payments", verifyFBToken, async (req, res) => {
+      const email = req.query.email;
+      const query = {};
 
-            if (email) {
-                query.customerEmail = email;
+      if (email) {
+        query.customerEmail = email;
 
-                if (email !== req.decoded_email) {
-                    return res.status(403).send({ message: 'forbidden access' })
-                }
-            }
-            const cursor = paymentCollection.find(query).sort({ paidAt: -1 });
-            const result = await cursor.toArray();
-            res.send(result);
-        })
-
+        if (email !== req.decoded_email) {
+          return res.status(403).send({ message: "forbidden access" });
+        }
+      }
+      const cursor = paymentCollection.find(query).sort({ paidAt: -1 });
+      const result = await cursor.toArray();
+      res.send(result);
+    });
 
     // create payments
 
@@ -295,7 +397,9 @@ async function run() {
           return res.send({
             message: "already exists",
             transactionId,
-           trackingId: paymentExist.trackingId || (relatedBooking ? relatedBooking.trackingId : 'N/A')
+            trackingId:
+              paymentExist.trackingId ||
+              (relatedBooking ? relatedBooking.trackingId : "N/A"),
           });
         }
         const trackingId = session.metadata.trackingId;
