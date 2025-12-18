@@ -306,13 +306,31 @@ async function run() {
     app.get("/all-tickets/:id", async (req, res) => {
       const { id } = req.params;
       const objectId = new ObjectId(id);
-      const result = await ticketCollection.findOne({ _id: objectId });
+      const result = await vendorCollection.findOne({ _id: objectId });
 
       res.send({
         success: true,
         result,
       });
     });
+
+app.get("/approved-tickets", async (req, res) => {
+  try {
+    const query = { 
+      status: "approved",
+    };
+
+    const result = await vendorCollection.find(query).toArray();
+    
+    res.send({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    console.error("Error fetching approved tickets:", error);
+    res.status(500).send({ success: false, message: "Internal Server Error" });
+  }
+});
 
     //  booking tickets
     app.post("/bookings", async (req, res) => {
@@ -339,7 +357,7 @@ async function run() {
     // read ticket by user email
     app.get("/my-bookings", async (req, res) => {
       const email = req.query.email;
-      const cursor = bookingCollection.find({ vendorEmail: email });
+      const cursor = bookingCollection.find({ bookedBy: email });
       const result = await cursor.toArray();
       res.send(result);
     });
@@ -355,6 +373,26 @@ async function run() {
       });
     });
 
+app.get("/vendor/bookings", verifyFBToken, async (req, res) => {
+  const email = req.decoded_email; // From token
+  const query = { vendorEmail: email };
+  const result = await bookingCollection.find(query).toArray();
+  res.send(result);
+});
+
+// Update booking status 
+app.patch("/bookings/status/:id", verifyFBToken, async (req, res) => {
+  const id = req.params.id;
+  const { status } = req.body; 
+  const filter = { _id: new ObjectId(id) };
+  
+  const updatedDoc = {
+    $set: { status: status }
+  };
+
+  const result = await bookingCollection.updateOne(filter, updatedDoc);
+  res.send(result);
+});
     // Delete booking and restore ticket quantity
     app.delete("/bookings/:id", async (req, res) => {
       try {
@@ -495,7 +533,7 @@ async function run() {
             return res.send({ success: true, message: "Already updated" });
           }
 
-          const ticket = await ticketCollection.findOne({
+          const ticket = await vendorCollection.findOne({
             _id: new ObjectId(booking.ticketId),
           });
 
@@ -516,7 +554,7 @@ async function run() {
             }
           );
 
-          const updateTicketResult = await ticketCollection.updateOne(
+          const updateTicketResult = await vendorCollection.updateOne(
             { _id: new ObjectId(booking.ticketId) },
             { $set: { quantity: newQuantity } }
           );
