@@ -353,6 +353,11 @@ app.get("/advertisements", async (req, res) => {
     res.send(result);
 });
 
+app.get("/latest-tickets", async (req, res) => {
+    const query = {  status: "approved" };
+    const result = await vendorCollection.find(query) .sort({ postedDate: -1 }).limit(6).toArray();
+    res.send(result);
+});
     //  booking tickets
     app.post("/bookings", async (req, res) => {
       try {
