@@ -314,22 +314,43 @@ async function run() {
       });
     });
 
-app.get("/approved-tickets", async (req, res) => {
-  try {
-    const query = { 
-      status: "approved",
-    };
+// approved tickets apis
+app.get("/approved-tickets", verifyFBToken, async (req, res) => {
+    try {
+        const query = { status: "approved" };
+        const result = await vendorCollection.find(query).toArray();
+        res.send({ success: true, data: result });
+    } catch (error) {
+        res.status(500).send({ message: "Server error" });
+    }
+});
 
-    const result = await vendorCollection.find(query).toArray();
+
+app.patch("/tickets/advertise/:id", verifyFBToken, verifyAdmin, async (req, res) => {
+    const id = req.params.id;
+    const { isAdvertised } = req.body;
+
+    if (isAdvertised === true) {
+        const count = await vendorCollection.countDocuments({ isAdvertised: true });
+        if (count >= 6) {
+            return res.status(400).send({ 
+                success: false, 
+                message: "Maximum advertisement limit (6) reached." 
+            });
+        }
+    }
+
+    const query = { _id: new ObjectId(id) };
+    const updateDoc = { $set: { isAdvertised } };
+    const result = await vendorCollection.updateOne(query, updateDoc);
     
-    res.send({
-      success: true,
-      data: result
-    });
-  } catch (error) {
-    console.error("Error fetching approved tickets:", error);
-    res.status(500).send({ success: false, message: "Internal Server Error" });
-  }
+    res.send({ success: true, result });
+});
+
+app.get("/advertisements", async (req, res) => {
+    const query = { isAdvertised: true, status: "approved" };
+    const result = await vendorCollection.find(query).limit(6).toArray();
+    res.send(result);
 });
 
     //  booking tickets
@@ -357,7 +378,7 @@ app.get("/approved-tickets", async (req, res) => {
     // read ticket by user email
     app.get("/my-bookings", async (req, res) => {
       const email = req.query.email;
-      const cursor = bookingCollection.find({ bookedBy: email });
+      const cursor = bookingCollection.find({ customerEmail: email });
       const result = await cursor.toArray();
       res.send(result);
     });
@@ -374,7 +395,7 @@ app.get("/approved-tickets", async (req, res) => {
     });
 
 app.get("/vendor/bookings", verifyFBToken, async (req, res) => {
-  const email = req.decoded_email; // From token
+  const email = req.decoded_email; 
   const query = { vendorEmail: email };
   const result = await bookingCollection.find(query).toArray();
   res.send(result);
@@ -472,7 +493,7 @@ app.patch("/bookings/status/:id", verifyFBToken, async (req, res) => {
             quantity: 1,
           },
         ],
-        customer_email: paymentInfo.bookedBy,
+        customer_email: paymentInfo.customerEmail,
         mode: "payment",
         metadata: {
           ticketId: paymentInfo.ticketId,
@@ -495,7 +516,7 @@ app.patch("/bookings/status/:id", verifyFBToken, async (req, res) => {
             .send({ success: false, message: "Missing session_id" });
 
         const session = await stripe.checkout.sessions.retrieve(sessionId);
-        // console.log(session);
+        console.log(session);
 
         const transactionId = session.payment_intent;
         const query = { transactionId: transactionId };
@@ -550,7 +571,7 @@ app.patch("/bookings/status/:id", verifyFBToken, async (req, res) => {
           await bookingCollection.updateOne(
             { _id: new ObjectId(bookingId) },
             {
-              $set: { bookingStatus: "paid", trackingId: trackingId },
+              $set: { bookingStatus: "paid",status:"paid" ,trackingId:trackingId },
             }
           );
 
