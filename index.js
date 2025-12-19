@@ -37,7 +37,7 @@ const verifyFBToken = async (req, res, next) => {
   try {
     const idToken = token.split(" ")[1];
     const decoded = await admin.auth().verifyIdToken(idToken);
-    console.log("decoded in the token", decoded);
+    // console.log("decoded in the token", decoded);
     req.decoded_email = decoded.email;
     next();
   } catch (err) {
@@ -315,40 +315,6 @@ async function run() {
     });
 
     // approved tickets apis
-    // app.get("/approved-tickets", verifyFBToken, async (req, res) => {
-    //   try {
-    //     const { fromLocation, toLocation, transportType, sort } = req.query;
-    //     const query = { status: "approved" };
-    //     const searchConditions = [];
-    
-    // if (fromLocation) {
-    //   searchConditions.push({ fromLocation: { $regex: from, $options: 'i' } });
-    // }
-    // if (toLocation) {
-    //   searchConditions.push({ toLocation: { $regex: to, $options: 'i' } });
-    // }
-    // if (transportType && transportType !== 'All') {
-    //   searchConditions.push({ transportType: transportType });
-    // }
-
-    // if (searchConditions.length > 0) {
-    //   query.$and = [
-    //     { status: "approved" }, 
-    //     ...searchConditions
-    //   ];
-    // }
-    // let sortOptions = {};
-    // if (sort === "lowToHigh") {
-    //   sortOptions = { price: 1 }; 
-    // } else if (sort === "highToLow") {
-    //   sortOptions = { price: -1 }; 
-    // }
-    //     const result = await vendorCollection.find(query).sort(sortOptions).toArray();
-    //     res.send({ success: true, data: result });
-    //   } catch (error) {
-    //     res.status(500).send({ message: "Server error" });
-    //   }
-    // });
     app.get("/approved-tickets", verifyFBToken, async (req, res) => {
   try {
     const { from, to, type, sort } = req.query; 
