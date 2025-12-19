@@ -314,50 +314,121 @@ async function run() {
       });
     });
 
-// approved tickets apis
-app.get("/approved-tickets", verifyFBToken, async (req, res) => {
-    try {
-        const query = { status: "approved" };
-        const result = await vendorCollection.find(query).toArray();
-        res.send({ success: true, data: result });
-    } catch (error) {
-        res.status(500).send({ message: "Server error" });
-    }
-});
-
-
-app.patch("/tickets/advertise/:id", verifyFBToken, verifyAdmin, async (req, res) => {
-    const id = req.params.id;
-    const { isAdvertised } = req.body;
-
-    if (isAdvertised === true) {
-        const count = await vendorCollection.countDocuments({ isAdvertised: true });
-        if (count >= 6) {
-            return res.status(400).send({ 
-                success: false, 
-                message: "Maximum advertisement limit (6) reached." 
-            });
-        }
-    }
-
-    const query = { _id: new ObjectId(id) };
-    const updateDoc = { $set: { isAdvertised } };
-    const result = await vendorCollection.updateOne(query, updateDoc);
+    // approved tickets apis
+    // app.get("/approved-tickets", verifyFBToken, async (req, res) => {
+    //   try {
+    //     const { fromLocation, toLocation, transportType, sort } = req.query;
+    //     const query = { status: "approved" };
+    //     const searchConditions = [];
     
-    res.send({ success: true, result });
-});
+    // if (fromLocation) {
+    //   searchConditions.push({ fromLocation: { $regex: from, $options: 'i' } });
+    // }
+    // if (toLocation) {
+    //   searchConditions.push({ toLocation: { $regex: to, $options: 'i' } });
+    // }
+    // if (transportType && transportType !== 'All') {
+    //   searchConditions.push({ transportType: transportType });
+    // }
 
-app.get("/advertisements", async (req, res) => {
-    const query = { isAdvertised: true, status: "approved" };
-    const result = await vendorCollection.find(query).limit(6).toArray();
-    res.send(result);
-});
+    // if (searchConditions.length > 0) {
+    //   query.$and = [
+    //     { status: "approved" }, 
+    //     ...searchConditions
+    //   ];
+    // }
+    // let sortOptions = {};
+    // if (sort === "lowToHigh") {
+    //   sortOptions = { price: 1 }; 
+    // } else if (sort === "highToLow") {
+    //   sortOptions = { price: -1 }; 
+    // }
+    //     const result = await vendorCollection.find(query).sort(sortOptions).toArray();
+    //     res.send({ success: true, data: result });
+    //   } catch (error) {
+    //     res.status(500).send({ message: "Server error" });
+    //   }
+    // });
+    app.get("/approved-tickets", verifyFBToken, async (req, res) => {
+  try {
+    const { from, to, type, sort } = req.query; 
 
-app.get("/latest-tickets", async (req, res) => {
-    const query = {  status: "approved" };
-    const result = await vendorCollection.find(query) .sort({ postedDate: -1 }).limit(6).toArray();
-    res.send(result);
+    const query = { status: "approved" };
+    const searchConditions = [];
+
+    if (from && from.trim() !== "") {
+      searchConditions.push({ fromLocation: { $regex: from, $options: 'i' } });
+    }
+    
+    if (to && to.trim() !== "") {
+      searchConditions.push({ toLocation: { $regex: to, $options: 'i' } });
+    }
+    
+    if (type && type !== 'All') {
+      searchConditions.push({ transportType: type });
+    }
+
+    if (searchConditions.length > 0) {
+      query.$and = [
+        { status: "approved" }, 
+        ...searchConditions
+      ];
+    }
+    let sortOptions = {};
+    if (sort === "lowToHigh") {
+      sortOptions = { price: 1 }; 
+    } else if (sort === "highToLow") {
+      sortOptions = { price: -1 }; 
+    }
+
+    const result = await vendorCollection.find(query).sort(sortOptions).toArray();
+    res.send({ success: true, data: result });
+
+  } catch (error) {
+    console.error("Backend Error:", error);
+    res.status(500).send({ message: "Server error", error: error.message });
+  }
 });
+// for making advertise
+    app.patch("/tickets/advertise/:id",verifyFBToken,verifyAdmin,async (req, res) => {
+        const id = req.params.id;
+        const { isAdvertised } = req.body;
+
+        if (isAdvertised === true) {
+          const count = await vendorCollection.countDocuments({
+            isAdvertised: true,
+          });
+          if (count >= 6) {
+            return res.status(400).send({
+              success: false,
+              message: "Maximum advertisement limit (6) reached.",
+            });
+          }
+        }
+
+        const query = { _id: new ObjectId(id) };
+        const updateDoc = { $set: { isAdvertised } };
+        const result = await vendorCollection.updateOne(query, updateDoc);
+
+        res.send({ success: true, result });
+      }
+    );
+
+    app.get("/advertisements", async (req, res) => {
+      const query = { isAdvertised: true, status: "approved" };
+      const result = await vendorCollection.find(query).limit(6).toArray();
+      res.send(result);
+    });
+
+    app.get("/latest-tickets", async (req, res) => {
+      const query = { status: "approved" };
+      const result = await vendorCollection
+        .find(query)
+        .sort({ postedDate: -1 })
+        .limit(6)
+        .toArray();
+      res.send(result);
+    });
     //  booking tickets
     app.post("/bookings", async (req, res) => {
       try {
@@ -399,26 +470,26 @@ app.get("/latest-tickets", async (req, res) => {
       });
     });
 
-app.get("/vendor/bookings", verifyFBToken, async (req, res) => {
-  const email = req.decoded_email; 
-  const query = { vendorEmail: email };
-  const result = await bookingCollection.find(query).toArray();
-  res.send(result);
-});
+    app.get("/vendor/bookings", verifyFBToken, async (req, res) => {
+      const email = req.decoded_email;
+      const query = { vendorEmail: email };
+      const result = await bookingCollection.find(query).toArray();
+      res.send(result);
+    });
 
-// Update booking status 
-app.patch("/bookings/status/:id", verifyFBToken, async (req, res) => {
-  const id = req.params.id;
-  const { status } = req.body; 
-  const filter = { _id: new ObjectId(id) };
-  
-  const updatedDoc = {
-    $set: { status: status }
-  };
+    // Update booking status
+    app.patch("/bookings/status/:id", verifyFBToken, async (req, res) => {
+      const id = req.params.id;
+      const { status } = req.body;
+      const filter = { _id: new ObjectId(id) };
 
-  const result = await bookingCollection.updateOne(filter, updatedDoc);
-  res.send(result);
-});
+      const updatedDoc = {
+        $set: { status: status },
+      };
+
+      const result = await bookingCollection.updateOne(filter, updatedDoc);
+      res.send(result);
+    });
     // Delete booking and restore ticket quantity
     app.delete("/bookings/:id", async (req, res) => {
       try {
@@ -576,7 +647,11 @@ app.patch("/bookings/status/:id", verifyFBToken, async (req, res) => {
           await bookingCollection.updateOne(
             { _id: new ObjectId(bookingId) },
             {
-              $set: { bookingStatus: "paid",status:"paid" ,trackingId:trackingId },
+              $set: {
+                bookingStatus: "paid",
+                status: "paid",
+                trackingId: trackingId,
+              },
             }
           );
 
@@ -622,6 +697,61 @@ app.patch("/bookings/status/:id", verifyFBToken, async (req, res) => {
           .send({ success: false, message: "Internal Server Error" });
       }
     });
+
+
+    // pipeline:
+app.get('/vendor/revenue',verifyFBToken,async (req, res) => {
+
+  const email = req.decoded_email;
+
+    if (!email) {
+        return res.status(401).send({ message: "Unauthorized access: No email in token" });
+    }
+
+    try {
+        const bookingStats = await bookingCollection.aggregate([
+            { 
+                $match: { 
+                    status: "paid", 
+                    vendorEmail: email 
+                } 
+            },
+            { 
+                $group: { 
+                    _id: null, 
+                    rev: { 
+                        $sum: { 
+                            $multiply: [
+                                { $toDouble: { $ifNull: ["$bookingQuantity", 0] } }, 
+                                { $toDouble: { $ifNull: ["$unitPrice", 0] } }
+                            ] 
+                        } 
+                    }, 
+                    sold: { $sum: { $toDouble: { $ifNull: ["$bookingQuantity", 0] } } } 
+                } 
+            }
+        ]).toArray();
+
+        const ticketStats = await vendorCollection.aggregate([
+            { $match: { status: "approved", vendorEmail: email } },
+            { $group: { _id: null, added: { $sum: { $toDouble: { $ifNull: ["$quantity", 0] } } } } }
+        ]).toArray();
+
+        res.send({
+          success: true,
+            totalRevenue: bookingStats[0]?.rev || 0,
+            totalTicketsSold: bookingStats[0]?.sold || 0,
+            totalTicketsAdded: ticketStats[0]?.added || 0
+        });
+
+    } catch (error) {
+        console.error("Aggregation Error:", error);
+        res.status(500).send({ message: "Server error", error: error.message });
+    }
+});
+
+
+
 
     await client.db("admin").command({ ping: 1 });
     console.log(
