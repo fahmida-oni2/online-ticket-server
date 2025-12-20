@@ -16,3 +16,12 @@ This is the server side of Ticket Hub - A online ticket booking platform. Ticket
 * `JWT_ACCESS_TOKEN`: A secret string for token generation.
 * `STRIPE_SECRET_KEY`: Your Stripe secret key.
 * Run `node index.js` or `npm start` to start the server.
+
+ ## "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "firebase-admin": "^13.6.0",
+    "mongodb": "^7.0.0",
+    "stripe": "^20.1.0"
+  }
