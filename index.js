@@ -9,8 +9,8 @@ const port = 3000;
 
 const admin = require("firebase-admin");
 
-const serviceAccount = require("./online-ticket-platform-firebase-adminsdk.json");
-
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString('utf8')
+const serviceAccount = JSON.parse(decoded);
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
@@ -57,7 +57,7 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
     const db = client.db("ticket-db");
     const userCollection = db.collection("users");
     const vendorCollection = db.collection("vendor");
@@ -96,7 +96,7 @@ async function run() {
     });
     app.post("/users", async (req, res) => {
       const user = req.body;
-      user.role = "user";
+     user.role = user.role || "user";
       user.createdAt = new Date();
       const email = user.email;
       const userExists = await userCollection.findOne({ email });
@@ -315,9 +315,11 @@ async function run() {
     });
 
     // approved tickets apis
-    app.get("/approved-tickets", verifyFBToken, async (req, res) => {
+    app.get("/approved-tickets",  async (req, res) => {
   try {
-    const { from, to, type, sort } = req.query; 
+    const page = parseInt(req.query.page) || 0;
+    const size = parseInt(req.query.size) || 10;
+    const { from, to, type, sort} = req.query; 
 
     const query = { status: "approved" };
     const searchConditions = [];
@@ -346,9 +348,10 @@ async function run() {
     } else if (sort === "highToLow") {
       sortOptions = { price: -1 }; 
     }
-
-    const result = await vendorCollection.find(query).sort(sortOptions).toArray();
-    res.send({ success: true, data: result });
+  const totalCount = await vendorCollection.countDocuments(query);
+    const result = await vendorCollection.find(query).sort(sortOptions).skip(page * size).limit(size).toArray();
+  
+    res.send({ success: true, data: result,totalCount });
 
   } catch (error) {
     console.error("Backend Error:", error);
@@ -719,7 +722,7 @@ app.get('/vendor/revenue',verifyFBToken,async (req, res) => {
 
 
 
-    await client.db("admin").command({ ping: 1 });
+    // await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
